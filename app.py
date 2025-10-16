@@ -84,6 +84,7 @@ def make_default_filters(df: pd.DataFrame, column_map: utils.ColumnMap) -> utils
 
 
 def render_kpi_cards(metrics: Dict[str, Optional[float]]) -> None:
+    print(metrics)
     kpis = [
         ("Total Trades", metrics.get("total_trades"), lambda v: f"{int(v):,}" if v is not None else "—"),
         ("Win Rate", metrics.get("win_rate"), utils.fmt_pct),
@@ -192,9 +193,21 @@ def main() -> None:
 
     if "filters_state" not in st.session_state:
         st.session_state.filters_state = make_default_filters(df, column_map)
+    if "start_capital" not in st.session_state:
+        st.session_state.start_capital = compute.DEFAULT_START_CAPITAL
 
     with st.sidebar:
         st.header("Filters")
+        st.subheader("Equity Settings")
+        start_capital_input = st.number_input(
+            "Start capital",
+            min_value=0.0,
+            value=float(st.session_state.start_capital),
+            step=10_000.0,
+            format="%.2f",
+        )
+        st.session_state.start_capital = start_capital_input
+        start_capital = st.session_state.start_capital
         defaults = make_default_filters(df, column_map)
         current = st.session_state.filters_state
 
@@ -299,6 +312,8 @@ def main() -> None:
         st.session_state.rolling_window = utils.DEFAULT_WINDOWS["rolling_window"]
         st.experimental_rerun()
 
+    start_capital = st.session_state.start_capital
+
     if apply_filters:
         start_ts = pd.Timestamp(date_range[0]) if date_range and isinstance(date_range, Sequence) else None
         end_ts = pd.Timestamp(date_range[1]) if date_range and isinstance(date_range, Sequence) else None
@@ -325,10 +340,10 @@ def main() -> None:
         summary_text = " | ".join(f"**{k}:** {v}" for k, v in filter_summary.items())
         st.info(f"Active filters → {summary_text}")
 
-    metrics = compute.kpis(filtered_df, column_map)
-    equity_df = compute.equity_curve(filtered_df, column_map)
+    metrics = compute.kpis(filtered_df, column_map, start_capital=start_capital)
+    equity_df = compute.equity_curve(filtered_df, column_map, start_capital=start_capital)
     rolling = compute.rolling_metrics(filtered_df, column_map, window=rolling_window)
-    drawdown_df = compute.drawdowns(filtered_df, column_map)
+    drawdown_df = compute.drawdowns(filtered_df, column_map, start_capital=start_capital)
     league = compute.per_symbol_table(filtered_df, column_map)
     hold_summary = compute.holding_period_summary(filtered_df)
     timeline_df = compute.timeline_dataframe(filtered_df, column_map)

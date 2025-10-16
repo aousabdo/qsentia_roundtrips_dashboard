@@ -201,5 +201,5 @@ def summarize_filters(filters: FilterParams) -> Dict[str, str]:
         lo, hi = filters.hold_days_range
         summary["Hold days"] = f"{lo or 0:.1f} ↔ {hi or '∞'}"
     if filters.pnl_clip:
-        summary["P&L clip"] = f"[{filters.pnl_clip[0] or 'auto'}, {filters.pnl_clip[1] or 'auto'}]"
+        summary["P&L clip"] = f"[{round(filters.pnl_clip[0], 1) or 'auto'}, {round(filters.pnl_clip[1], 1) or 'auto'}]"
     return summary

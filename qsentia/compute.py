@@ -29,6 +29,8 @@ CAP_T2 = 0.60
 CAP_T3 = 0.30
 CAP_OUT = 0.20
 
+DEFAULT_START_CAPITAL = 1_000_000.0
+
 
 def prepare_dataframe(df: pd.DataFrame, column_map: utils.ColumnMap) -> Tuple[pd.DataFrame, utils.ColumnMap]:
     """
@@ -167,7 +169,11 @@ def pnl_concentration(df: pd.DataFrame) -> Dict[str, Optional[float]]:
     }
 
 
-def kpis(df: pd.DataFrame, column_map: utils.ColumnMap) -> Dict[str, Optional[float]]:
+def kpis(
+    df: pd.DataFrame,
+    column_map: utils.ColumnMap,
+    start_capital: float = DEFAULT_START_CAPITAL,
+) -> Dict[str, Optional[float]]:
     metrics: Dict[str, Optional[float]] = {}
 
     pnl_series = pd.to_numeric(df["_pnl_w"], errors="coerce").dropna()
@@ -239,41 +245,53 @@ def kpis(df: pd.DataFrame, column_map: utils.ColumnMap) -> Dict[str, Optional[fl
     concentration = pnl_concentration(df)
     metrics.update(concentration)
 
-    equity = equity_curve(df, column_map)
+    equity = equity_curve(df, column_map, start_capital=start_capital)
     if not equity.empty:
         metrics["max_drawdown"] = float(equity["drawdown"].min())
         metrics["avg_hold_days"] = float(df["_hold_days"].mean())
         metrics["median_hold_days"] = float(df["_hold_days"].median())
 
-        # Annualised metrics based on daily returns if available.
-        if "daily_return" in equity:
-            daily_return = equity["daily_return"].dropna()
-            if not daily_return.empty and np.isfinite(daily_return.std(ddof=1)):
-                mu = daily_return.mean()
-                sigma = daily_return.std(ddof=1)
-                metrics["ann_return"] = float(mu * utils.DEFAULT_WINDOWS["trading_year"])
-                metrics["ann_vol"] = float(sigma * np.sqrt(utils.DEFAULT_WINDOWS["trading_year"]))
-                metrics["sharpe"] = float(mu / sigma * np.sqrt(utils.DEFAULT_WINDOWS["trading_year"])) if sigma > 0 else np.nan
-            else:
-                metrics["ann_return"] = None
-                metrics["ann_vol"] = None
-                metrics["sharpe"] = None
+        daily_return = equity["daily_return"].dropna()
+        trading_days = utils.DEFAULT_WINDOWS["trading_year"]
+
+        if not equity["equity"].empty:
+            n_days = len(daily_return) + 1 if len(equity) > 0 else 0
+            start_equity = equity["equity"].iloc[0]
+            end_equity = equity["equity"].iloc[-1]
         else:
-            metrics["ann_return"] = None
-            metrics["ann_vol"] = None
-            metrics["sharpe"] = None
+            n_days = 0
+            start_equity = np.nan
+            end_equity = np.nan
+
+        if n_days > 0 and start_equity > 0 and np.isfinite(end_equity):
+            metrics["ann_return"] = float((end_equity / start_equity) ** (trading_days / n_days) - 1)
+        else:
+            metrics["ann_return"] = 0.0
+
+        if len(daily_return) > 1:
+            sigma = daily_return.std(ddof=1)
+            mu = daily_return.mean()
+            metrics["ann_vol"] = float(sigma * np.sqrt(trading_days)) if sigma > 0 else 0.0
+            metrics["sharpe"] = float((mu / sigma) * np.sqrt(trading_days)) if sigma > 0 else 0.0
+        else:
+            metrics["ann_vol"] = 0.0
+            metrics["sharpe"] = 0.0
     else:
         metrics["max_drawdown"] = None
         metrics["avg_hold_days"] = None
         metrics["median_hold_days"] = None
-        metrics["ann_return"] = None
-        metrics["ann_vol"] = None
-        metrics["sharpe"] = None
+        metrics["ann_return"] = 0.0
+        metrics["ann_vol"] = 0.0
+        metrics["sharpe"] = 0.0
 
     return metrics
 
 
-def equity_curve(df: pd.DataFrame, column_map: utils.ColumnMap) -> pd.DataFrame:
+def equity_curve(
+    df: pd.DataFrame,
+    column_map: utils.ColumnMap,
+    start_capital: float = DEFAULT_START_CAPITAL,
+) -> pd.DataFrame:
     if column_map.timestamp_close is None or df.empty:
         return pd.DataFrame()
 
@@ -281,31 +299,40 @@ def equity_curve(df: pd.DataFrame, column_map: utils.ColumnMap) -> pd.DataFrame:
     if daily_pnl.empty:
         return pd.DataFrame()
 
-    equity = daily_pnl.cumsum()
+    start_day = daily_pnl.index.min()
+    end_day = daily_pnl.index.max()
+    tz = getattr(daily_pnl.index, "tz", None)
+    business_index = pd.date_range(start_day, end_day, freq="B", tz=tz)
+    if business_index.empty:
+        business_index = daily_pnl.index
+    pnl_daily = daily_pnl.reindex(business_index, fill_value=0.0)
+
+    equity = start_capital + pnl_daily.cumsum()
+    daily_return = equity.pct_change()
+
     rolling_max = equity.cummax()
     drawdown = equity - rolling_max
-
-    if column_map.ret and column_map.ret in df.columns:
-        daily_return = _daily_series(df, column_map, "_ret")
-    else:
-        daily_return = pd.Series(index=daily_pnl.index, dtype=float)
-
-    base_series = daily_return if not daily_return.dropna().empty else daily_pnl
+    with np.errstate(divide="ignore", invalid="ignore"):
+        drawdown_pct = equity / rolling_max.replace(0, np.nan) - 1.0
 
     window = utils.DEFAULT_WINDOWS["rolling_window"]
-    rolling_sharpe = base_series.rolling(window).mean() / base_series.rolling(window).std(ddof=1)
-    rolling_sharpe *= np.sqrt(utils.DEFAULT_WINDOWS["trading_year"])
+    rolling_mean = daily_return.rolling(window).mean()
+    rolling_std = daily_return.rolling(window).std(ddof=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rolling_sharpe = (rolling_mean / rolling_std) * np.sqrt(utils.DEFAULT_WINDOWS["trading_year"])
+    rolling_sharpe = rolling_sharpe.replace([np.inf, -np.inf], np.nan)
 
     out = pd.DataFrame(
         {
-            "date": daily_pnl.index,
-            "daily_pnl": daily_pnl.values,
+            "date": business_index,
+            "daily_pnl": pnl_daily.values,
             "equity": equity.values,
+            "daily_return": daily_return.values,
             "rolling_sharpe": rolling_sharpe.values,
             "drawdown": drawdown.values,
+            "drawdown_pct": drawdown_pct.values,
         }
     )
-    out["daily_return"] = daily_return.reindex(out["date"]).values
     return out
 
 
@@ -327,8 +354,12 @@ def rolling_metrics(df: pd.DataFrame, column_map: utils.ColumnMap, window: int =
     }
 
 
-def drawdowns(df: pd.DataFrame, column_map: utils.ColumnMap) -> pd.DataFrame:
-    curve = equity_curve(df, column_map)
+def drawdowns(
+    df: pd.DataFrame,
+    column_map: utils.ColumnMap,
+    start_capital: float = DEFAULT_START_CAPITAL,
+) -> pd.DataFrame:
+    curve = equity_curve(df, column_map, start_capital=start_capital)
     if curve.empty:
         return pd.DataFrame()
     underwater = curve[["date", "drawdown"]].copy()
