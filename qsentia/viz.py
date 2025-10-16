@@ -89,13 +89,10 @@ def fig_per_symbol_bar(table_df: pd.DataFrame, top_n: int = 20) -> go.Figure:
         fig = go.Figure()
         fig.update_layout(title="No per-symbol data", template="plotly_white")
         return fig
+
     top = table_df.head(top_n).reset_index().rename(columns={"index": "symbol"})
-    palette = {
-        "Tier 1": "#1b9e77",
-        "Tier 2": "#d95f02",
-        "Tier 3": "#7570b3",
-        "Outlier-Hold": "#e7298a",
-    }
+    palette = {"Tier 1": "#1b9e77", "Tier 2": "#d95f02", "Tier 3": "#7570b3", "Outlier-Hold": "#e7298a"}
+
     fig = px.bar(
         top,
         x="symbol",
@@ -105,9 +102,24 @@ def fig_per_symbol_bar(table_df: pd.DataFrame, top_n: int = 20) -> go.Figure:
         title=f"Top {top_n} Symbols by Total P&L",
         text="total_pnl",
     )
-    fig.update_layout(template="plotly_white", xaxis_title="Symbol", yaxis_title="Total P&L")
-    fig.update_traces(texttemplate="%{text:.2f}", textposition="outside", cliponaxis=False)
+
+    has_tier = "tier" in top.columns
+    if has_tier:
+        fig.update_traces(
+            customdata=top[["tier"]].values,
+            hovertemplate="<b>%{x}</b><br>Tier: %{customdata[0]}<br>Total P&L: %{y:.1f}<extra></extra>",
+        )
+    else:
+        fig.update_traces(
+            hovertemplate="<b>%{x}</b><br>Total P&L: %{y:.1f}<extra></extra>",
+        )
+
+    fig.update_traces(texttemplate="%{text:.1f}", textposition="outside", cliponaxis=False)
+    fig.update_layout(template="plotly_white", xaxis_title="Symbol", yaxis_title="Total P&L", yaxis=dict(tickformat=".1f"))
     return fig
+
+
+
 
 
 def fig_violin_returns(df: pd.DataFrame, by: str = "symbol", color: Optional[str] = None) -> go.Figure:
@@ -615,49 +627,72 @@ def fig_tier_violin(league: pd.DataFrame) -> go.Figure:
         fig = go.Figure()
         fig.update_layout(title="Tier violin unavailable", template="plotly_white")
         return fig
+
     metrics = [
         ("trades", "Trades by Tier"),
         ("win_rate", "Win Rate by Tier"),
         ("total_pnl", "Total P&L by Tier"),
         ("avg_pnl", "Average P&L by Tier"),
     ]
-    palette = {
-        "Tier 1": "#1b9e77",
-        "Tier 2": "#d95f02",
-        "Tier 3": "#7570b3",
-        "Outlier-Hold": "#e7298a",
-    }
+    tier_order = ["Tier 1", "Tier 2", "Tier 3", "Outlier-Hold"]
+    color_cycle = px.colors.qualitative.Dark2
+    palette = {tier: color_cycle[idx % len(color_cycle)] for idx, tier in enumerate(tier_order)}
 
-    fig = make_subplots(rows=2, cols=2, subplot_titles=[m[1] for m in metrics], shared_xaxes=False)
-    for idx, (col, _) in enumerate(metrics, start=1):
+    fig = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=[title for _, title in metrics],
+        shared_xaxes=False,
+        shared_yaxes=False,
+    )
+
+    for idx, (metric, _) in enumerate(metrics, start=1):
+        if metric not in league.columns:
+            continue
         row = 1 if idx <= 2 else 2
         col_pos = 1 if idx in {1, 3} else 2
-        if col not in league.columns:
-            continue
-        for tier, color in palette.items():
-            tier_values = league.loc[league["tier"] == tier, col].dropna()
-            if tier_values.empty:
+
+        for tier in tier_order:
+            color = palette.get(tier)
+            tier_values = league.loc[league["tier"] == tier, metric].dropna()
+            if tier_values.empty or color is None:
                 continue
             fig.add_trace(
                 go.Violin(
-                    x=[tier] * len(tier_values),
-                    y=tier_values,
+                    x=tier_values,
+                    y=[tier] * len(tier_values),
                     name=tier,
                     legendgroup=tier,
-                    scalegroup=tier,
+                    orientation="h",
+                    scalegroup=metric,
                     line_color=color,
                     fillcolor=color,
-                    opacity=0.55,
-                    meanline_visible=True,
+                    opacity=0.6,
+                    meanline_visible=False,
                     spanmode="hard",
                     points="all",
+                    pointpos=0.0,
+                    jitter=0.0,
+                    marker=dict(symbol="line-ns-open", size=8, line=dict(color=color, width=1)),
                     showlegend=(idx == 1),
                 ),
                 row=row,
                 col=col_pos,
             )
-        fig.update_xaxes(title_text="Tier", row=row, col=col_pos)
-        fig.update_yaxes(title_text=metrics[idx - 1][0], row=row, col=col_pos)
 
-    fig.update_layout(template="plotly_white", height=800)
+        fig.update_xaxes(title_text=metric, row=row, col=col_pos)
+        fig.update_yaxes(
+            title_text="Tier",
+            row=row,
+            col=col_pos,
+            categoryorder="array",
+            categoryarray=tier_order,
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        height=850,
+        title="Tier Metric Violins",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
     return fig

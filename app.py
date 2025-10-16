@@ -590,8 +590,21 @@ def main() -> None:
     with tabs[3]:
         st.subheader("Distribution Views")
         log_scale = st.checkbox("Log scale", key="hist_log_scale")
-        st.plotly_chart(viz.fig_pnl_histogram(pnl_series), width="stretch")
-        st.plotly_chart(viz.fig_hist_returns(filtered_df, log_y=log_scale), width="stretch")
+        # st.plotly_chart(viz.fig_pnl_histogram(pnl_series), width="stretch")
+        pnl_histogram_fig = viz.fig_pnl_histogram(pnl_series)
+        pnl_histogram_fig.update_layout(
+            width=1000,
+            height=600,
+        )
+        st.plotly_chart(pnl_histogram_fig, use_container_width=False)
+        
+        # st.plotly_chart(viz.fig_hist_returns(filtered_df, log_y=log_scale), width="stretch")
+        hist_returns_fig = viz.fig_hist_returns(filtered_df, log_y=log_scale)
+        hist_returns_fig.update_layout(
+            width=1000,
+            height=600,
+        )
+        st.plotly_chart(hist_returns_fig, use_container_width=False)
         # st.plotly_chart(
         #     viz.fig_violin_returns(
         #         filtered_df,
