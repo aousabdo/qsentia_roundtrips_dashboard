@@ -202,42 +202,124 @@ def fig_ecdf_returns(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+# def fig_lorenz_curve(lorenz: Optional[Iterable[float]]) -> go.Figure:
+#     if lorenz is None:
+#         fig = go.Figure()
+#         fig.update_layout(title="Lorenz curve unavailable", template="plotly_white")
+#         return fig
+#     lorenz = list(lorenz)
+#     xs = [i / (len(lorenz) - 1) for i in range(len(lorenz))]
+#     fig = go.Figure()
+#     fig.add_trace(
+#         go.Scatter(
+#             x=xs,
+#             y=lorenz,
+#             mode="lines",
+#             name="Lorenz |P&L|",
+#             line=dict(color="#1f77b4", width=2),
+#         )
+#     )
+#     fig.add_trace(
+#         go.Scatter(
+#             x=[0, 1],
+#             y=[0, 1],
+#             mode="lines",
+#             name="Equality",
+#             line=dict(color="#e87d3f", dash="dash"),
+#         )
+#     )
+#     fig.update_layout(
+#         title="Lorenz Curve of Absolute P&L",
+#         template="plotly_white",
+#         xaxis_title="Fraction of trades",
+#         yaxis_title="Fraction of total |P&L|",
+#         autosize=False,
+#         width=500,
+#         height=500,
+#     )
+#     return fig
+
+import numpy as np
+import plotly.graph_objects as go
+from typing import Iterable, Optional
+
 def fig_lorenz_curve(lorenz: Optional[Iterable[float]]) -> go.Figure:
     if lorenz is None:
         fig = go.Figure()
         fig.update_layout(title="Lorenz curve unavailable", template="plotly_white")
         return fig
-    lorenz = list(lorenz)
-    xs = [i / (len(lorenz) - 1) for i in range(len(lorenz))]
+
+    # Ensure list and clamp to [0, 1]; force endpoints (0,0) and (1,1)
+    y = np.asarray(list(lorenz), dtype=float)
+    y = np.clip(y, 0.0, 1.0)
+    if y[0] != 0.0:  # some generators start after 0
+        y = np.insert(y, 0, 0.0)
+    if y[-1] != 1.0:
+        y = np.append(y, 1.0)
+
+    x = np.linspace(0.0, 1.0, len(y))
+
     fig = go.Figure()
+
+    # Lorenz curve
     fig.add_trace(
         go.Scatter(
-            x=xs,
-            y=lorenz,
+            x=x, y=y,
             mode="lines",
-            name="Lorenz |P&L|",
-            line=dict(color="#1f77b4", width=2),
+            name="Lorenz (|P&L|)",
+            line=dict(color="#1f77b4", width=3),  # slightly thicker for clarity
+            hovertemplate="Fraction of trades: %{x:.2f}<br>Fraction of total |P&L|: %{y:.2f}<extra></extra>",
         )
     )
+
+    # Equality line
     fig.add_trace(
         go.Scatter(
-            x=[0, 1],
-            y=[0, 1],
+            x=[0, 1], y=[0, 1],
             mode="lines",
             name="Equality",
-            line=dict(color="#aaaaaa", dash="dash"),
+            line=dict(color="#e87d3f", width=2, dash="dash"),
+            hoverinfo="skip",
         )
     )
+
     fig.update_layout(
         title="Lorenz Curve of Absolute P&L",
         template="plotly_white",
-        xaxis_title="Fraction of trades",
-        yaxis_title="Fraction of total |P&L|",
-        autosize=False,
-        width=500,
-        height=500,
+        width=720, height=540,  # 4:3 like your screenshot
+        margin=dict(l=60, r=20, t=60, b=60),
+        font=dict(size=16),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0.0,
+            bgcolor="rgba(255,255,255,0.7)"
+        ),
+        hovermode="x unified"
     )
+
+    # Axes styling to match Matplotlib cleanliness
+    fig.update_xaxes(
+        title_text="Fraction of trades",
+        range=[0, 1],
+        tick0=0, dtick=0.2, tickformat=".1f",
+        showline=True, linewidth=1, linecolor="#444",
+        mirror=True,
+        showgrid=True, gridcolor="rgba(0,0,0,0.08)", gridwidth=1,
+        ticks="outside", ticklen=6
+    )
+    fig.update_yaxes(
+        title_text="Fraction of total |P&L|",
+        range=[0, 1],
+        tick0=0, dtick=0.2, tickformat=".1f",
+        showline=True, linewidth=1, linecolor="#444",
+        mirror=True,
+        showgrid=True, gridcolor="rgba(0,0,0,0.08)", gridwidth=1,
+        ticks="outside", ticklen=6,
+        # Make the plot square like the Matplotlib figure
+        scaleanchor="x", scaleratio=1
+    )
+
     return fig
+
 
 
 def fig_daily_panels(daily_df: pd.DataFrame) -> go.Figure:
@@ -622,6 +704,81 @@ def fig_win_rate_bubble(league: pd.DataFrame, annotate: bool = False) -> go.Figu
     return fig
 
 
+# def fig_tier_violin(league: pd.DataFrame) -> go.Figure:
+#     if league.empty or "tier" not in league.columns:
+#         fig = go.Figure()
+#         fig.update_layout(title="Tier violin unavailable", template="plotly_white")
+#         return fig
+
+#     metrics = [
+#         ("trades", "Trades by Tier"),
+#         ("win_rate", "Win Rate by Tier"),
+#         ("total_pnl", "Total P&L by Tier"),
+#         ("avg_pnl", "Average P&L by Tier"),
+#     ]
+#     tier_order = ["Tier 1", "Tier 2", "Tier 3", "Outlier-Hold"]
+#     color_cycle = px.colors.qualitative.Dark2
+#     palette = {tier: color_cycle[idx % len(color_cycle)] for idx, tier in enumerate(tier_order)}
+
+#     fig = make_subplots(
+#         rows=2,
+#         cols=2,
+#         subplot_titles=[title for _, title in metrics],
+#         shared_xaxes=False,
+#         shared_yaxes=False,
+#     )
+
+#     for idx, (metric, _) in enumerate(metrics, start=1):
+#         if metric not in league.columns:
+#             continue
+#         row = 1 if idx <= 2 else 2
+#         col_pos = 1 if idx in {1, 3} else 2
+
+#         for tier in tier_order:
+#             color = palette.get(tier)
+#             tier_values = league.loc[league["tier"] == tier, metric].dropna()
+#             if tier_values.empty or color is None:
+#                 continue
+#             fig.add_trace(
+#                 go.Violin(
+#                     x=tier_values,
+#                     y=[tier] * len(tier_values),
+#                     name=tier,
+#                     legendgroup=tier,
+#                     orientation="h",
+#                     scalegroup=metric,
+#                     line_color=color,
+#                     fillcolor=color,
+#                     opacity=0.6,
+#                     meanline_visible=False,
+#                     spanmode="hard",
+#                     points="all",
+#                     pointpos=0.0,
+#                     jitter=0.0,
+#                     marker=dict(symbol="line-ns-open", size=8, line=dict(color=color, width=1)),
+#                     showlegend=(idx == 1),
+#                 ),
+#                 row=row,
+#                 col=col_pos,
+#             )
+
+#         fig.update_xaxes(title_text=metric, row=row, col=col_pos)
+#         fig.update_yaxes(
+#             title_text="Tier",
+#             row=row,
+#             col=col_pos,
+#             categoryorder="array",
+#             categoryarray=tier_order,
+#         )
+
+#     fig.update_layout(
+#         template="plotly_white",
+#         height=850,
+#         title="Tier Metric Violins",
+#         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+#     )
+#     return fig
+
 def fig_tier_violin(league: pd.DataFrame) -> go.Figure:
     if league.empty or "tier" not in league.columns:
         fig = go.Figure()
@@ -629,70 +786,111 @@ def fig_tier_violin(league: pd.DataFrame) -> go.Figure:
         return fig
 
     metrics = [
-        ("trades", "Trades by Tier"),
-        ("win_rate", "Win Rate by Tier"),
+        ("trades",    "Trades by Tier"),
+        ("win_rate",  "Win Rate by Tier"),
         ("total_pnl", "Total P&L by Tier"),
-        ("avg_pnl", "Average P&L by Tier"),
+        ("avg_pnl",   "Average P&L by Tier"),
     ]
+
+    # Match Seaborn plot: Tier 1 at top
     tier_order = ["Tier 1", "Tier 2", "Tier 3", "Outlier-Hold"]
-    color_cycle = px.colors.qualitative.Dark2
-    palette = {tier: color_cycle[idx % len(color_cycle)] for idx, tier in enumerate(tier_order)}
+
+    # Seaborn “Dark2”-like colors
+    fill_palette = {t: px.colors.qualitative.Dark2[i % 8] for i, t in enumerate(tier_order)}
+    outline = "rgba(0,0,0,0.95)"
 
     fig = make_subplots(
-        rows=2,
-        cols=2,
+        rows=2, cols=2,
         subplot_titles=[title for _, title in metrics],
-        shared_xaxes=False,
-        shared_yaxes=False,
+        shared_xaxes=False, shared_yaxes=False,
+        horizontal_spacing=0.12, vertical_spacing=0.12
     )
 
+    def style_axes(metric: str, row: int, col: int) -> None:
+        # common y (tiers)
+        fig.update_yaxes(
+            title_text="Tier",
+            categoryorder="array",
+            categoryarray=tier_order,
+            showline=True, linecolor="#444", linewidth=1, mirror=True,
+            row=row, col=col
+        )
+        # x by metric
+        xkw = dict(
+            showline=True, linecolor="#444", linewidth=1, mirror=True,
+            showgrid=True, gridcolor="rgba(0,0,0,0.08)", gridwidth=1,
+            ticks="outside", ticklen=6
+        )
+        if metric == "win_rate":
+            xkw.update(title_text="win_rate", range=[0, 1], tickformat=".1f", zeroline=False)
+        elif metric == "trades":
+            xkw.update(title_text="trades", tickformat="~d", zeroline=False)
+        elif metric == "total_pnl":
+            xkw.update(title_text="total_pnl", tickformat="~s", zeroline=True, zerolinecolor="#aaa")
+        else:  # avg_pnl
+            xkw.update(title_text="avg_pnl", tickformat="~s", zeroline=True, zerolinecolor="#aaa")
+        fig.update_xaxes(row=row, col=col, **xkw)
+
+    # build violins
     for idx, (metric, _) in enumerate(metrics, start=1):
         if metric not in league.columns:
             continue
-        row = 1 if idx <= 2 else 2
-        col_pos = 1 if idx in {1, 3} else 2
+        row, col = ((1,1),(1,2),(2,1),(2,2))[idx-1]
 
         for tier in tier_order:
-            color = palette.get(tier)
-            tier_values = league.loc[league["tier"] == tier, metric].dropna()
-            if tier_values.empty or color is None:
+            vals = league.loc[league["tier"] == tier, metric].pipe(pd.to_numeric, errors="coerce").dropna()
+            if vals.empty: 
                 continue
+
+            # Inner “sticks” via line markers; horizontal violins with black outline
             fig.add_trace(
                 go.Violin(
-                    x=tier_values,
-                    y=[tier] * len(tier_values),
+                    x=vals,
+                    y=[tier] * len(vals),
                     name=tier,
                     legendgroup=tier,
                     orientation="h",
-                    scalegroup=metric,
-                    line_color=color,
-                    fillcolor=color,
-                    opacity=0.6,
+                    scalegroup=metric,            # comparable widths within panel
+                    scalemode="width",
+                    side="both",                   # symmetric like seaborn
+                    spanmode="soft",
+                    line=dict(color=outline, width=1.5),
+                    fillcolor=fill_palette[tier],
+                    opacity=0.75,
+                    box_visible=False,
                     meanline_visible=False,
-                    spanmode="hard",
-                    points="all",
-                    pointpos=0.0,
-                    jitter=0.0,
-                    marker=dict(symbol="line-ns-open", size=8, line=dict(color=color, width=1)),
-                    showlegend=(idx == 1),
+                    points="all",                  # show inner sticks
+                    pointpos=0.0, jitter=0.0,      # centered sticks; no scatter
+                    marker=dict(
+                        symbol="line-ns-open",     # short vertical ticks
+                        size=14,                   # stick length
+                        line=dict(color=outline, width=1.0),
+                        opacity=0.55
+                    ),
+                    showlegend=(idx == 1),         # one legend row at top
+                    hovertemplate=f"Tier: {tier}<br>{metric}: "+"%{x:.3g}<extra></extra>",
                 ),
-                row=row,
-                col=col_pos,
+                row=row, col=col
             )
 
-        fig.update_xaxes(title_text=metric, row=row, col=col_pos)
-        fig.update_yaxes(
-            title_text="Tier",
-            row=row,
-            col=col_pos,
-            categoryorder="array",
-            categoryarray=tier_order,
-        )
+        style_axes(metric, row, col)
 
     fig.update_layout(
         template="plotly_white",
-        height=850,
+        height=950, width=1250,
         title="Tier Metric Violins",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        font=dict(size=16),
+        margin=dict(l=70, r=30, t=70, b=60),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom", y=1.04,
+            xanchor="left",   x=0.0,
+            bgcolor="rgba(255,255,255,0.7)"
+        ),
+        violinmode="overlay",
+        plot_bgcolor="white"
     )
+
     return fig
+
+
